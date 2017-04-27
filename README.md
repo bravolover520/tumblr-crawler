@@ -6,6 +6,11 @@ all the photos and videos from your favorite tumblr blogs.
 
 ## 中文版教程请[移步这里](./README_CN.md)
 
+## How to Discuss
+
+* Feel free to join our [Slack](https://tumblr-crawler.slack.com), where you can ask questions and help answer them on Slack.
+* Also you can open new issue on [Github](https://github.com/dixudx/tumblr-crawler/issues/new)
+
 ## Prerequisite
 
 #### For Programmers and Developers
@@ -39,10 +44,11 @@ There are 2 ways to specify the sites you want to download, either by creating a
 
 ### Use sites.txt
 
-Find a text editor and open the file `sites.txt`, add the sites you want to download into the file, separated by comma, no space, no `.tumblr.com` suffixes. For example, if you want to download _vogue.tumblr.com_ and _gucci.tumblr.com_, compose the file like this:
+Find a text editor and open the file `sites.txt`, add the sites you want to download into the file, separated by comma/space/tab/CR, no `.tumblr.com` suffixes. For example, if you want to download _vogue.tumblr.com_ and _gucci.tumblr.com_, compose the file like this:
 
 ```
 vogue,gucci
+vogue2, gucci2
 ```
 
 And then save the file, and run `python tumblr-photo-video-ripper.py`

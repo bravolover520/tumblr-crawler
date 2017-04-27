@@ -26,11 +26,38 @@ MEDIA_NUM = 50
 THREADS = 10
 
 
+def video_hd_match():
+    hd_pattern = re.compile(r'.*"hdUrl":("([^\s,]*)"|false),')
+
+    def match(video_player):
+        hd_match = hd_pattern.match(video_player)
+        try:
+            if hd_match is not None and hd_match.group(1) != 'false':
+                return hd_match.group(2).replace('\\', '')
+        except:
+            return None
+    return match
+
+
+def video_default_match():
+    default_pattern = re.compile(r'.*src="(\S*)" ', re.DOTALL)
+
+    def match(video_player):
+        default_match = default_pattern.match(video_player)
+        if default_match is not None:
+            try:
+                return default_match.group(1)
+            except:
+                return None
+    return match
+
+
 class DownloadWorker(Thread):
     def __init__(self, queue, proxies=None):
         Thread.__init__(self)
         self.queue = queue
         self.proxies = proxies
+        self._register_regex_match_rules()
 
     def run(self):
         while True:
@@ -46,6 +73,12 @@ class DownloadWorker(Thread):
         except TypeError:
             pass
 
+    # can register differnet regex match rules
+    def _register_regex_match_rules(self):
+        # will iterate all the rules
+        # the first matched result will be returned
+        self.regex_rules = [video_hd_match(), video_default_match()]
+
     def _handle_medium_url(self, medium_type, post):
         try:
             if medium_type == "photo":
@@ -53,13 +86,12 @@ class DownloadWorker(Thread):
 
             if medium_type == "video":
                 video_player = post["video-player"][1]["#text"]
-                pattern = re.compile(r'[\S\s]*src="(\S*)" ')
-                match = pattern.match(video_player)
-                if match is not None:
-                    try:
-                        return match.group(1)
-                    except IndexError:
-                        return None
+                for regex_rule in self.regex_rules:
+                    matched_url = regex_rule(video_player)
+                    if matched_url is not None:
+                        return matched_url
+                else:
+                    raise Exception
         except:
             raise TypeError("Unable to find the right url for downloading. "
                             "Please open a new issue on "
@@ -87,6 +119,10 @@ class DownloadWorker(Thread):
                                         stream=True,
                                         proxies=self.proxies,
                                         timeout=TIMEOUT)
+                    if resp.status_code == 403:
+                        retry_times = RETRY
+                        print("Access Denied when retrieve %s.\n" % medium_url)
+                        raise Exception("Access Denied")
                     with open(file_path, 'wb') as fh:
                         for chunk in resp.iter_content(chunk_size=1024):
                             fh.write(chunk)
@@ -155,13 +191,23 @@ class CrawlerScheduler(object):
             media_url = base_url.format(site, medium_type, MEDIA_NUM, start)
             response = requests.get(media_url,
                                     proxies=self.proxies)
-            data = xmltodict.parse(response.content)
+            if response.status_code == 404:
+                print("Site %s does not exist" % site)
+                break
+
             try:
+                data = xmltodict.parse(response.content)
                 posts = data["tumblr"]["posts"]["post"]
                 for post in posts:
-                    # select the largest resolution
-                    # usually in the first element
-                    self.queue.put((medium_type, post, target_folder))
+                    try:
+                        # if post has photoset, walk into photoset for each photo
+                        photoset = post["photoset"]["photo"]
+                        for photo in photoset:
+                            self.queue.put((medium_type, photo, target_folder))
+                    except:
+                        # select the largest resolution
+                        # usually in the first element
+                        self.queue.put((medium_type, post, target_folder))
                 start += MEDIA_NUM
             except KeyError:
                 break
@@ -169,14 +215,14 @@ class CrawlerScheduler(object):
 
 def usage():
     print("1. Please create file sites.txt under this same directory.\n"
-          "2. In sites.txt, you can specify tumblr sites separated only by "
-          "comma without any blank spaces.\n"
+          "2. In sites.txt, you can specify tumblr sites separated by "
+          "comma/space/tab/CR. Accept multiple lines of text\n"
           "3. Save the file and retry.\n\n"
           "Sample File Content:\nsite1,site2\n\n"
           "Or use command line options:\n\n"
           "Sample:\npython tumblr-photo-video-ripper.py site1,site2\n\n\n")
     print(u"未找到sites.txt文件，请创建.\n"
-          u"请在文件中指定Tumblr站点名，并以逗号分割，不要有空格.\n"
+          u"请在文件中指定Tumblr站点名，并以 逗号/空格/tab/表格鍵/回车符 分割，支持多行.\n"
           u"保存文件并重试.\n\n"
           u"例子: site1,site2\n\n"
           u"或者直接使用命令行参数指定站点\n"
@@ -190,6 +236,24 @@ def illegal_json():
     print(u"文件proxies.json格式非法.\n"
           u"请参照示例文件'proxies_sample1.json'和'proxies_sample2.json'.\n"
           u"然后去 http://jsonlint.com/ 进行验证.")
+
+
+def parse_sites(filename):
+    with open(filename, "r") as f:
+        raw_sites = f.read().rstrip().lstrip()
+
+    raw_sites = raw_sites.replace("\t", ",") \
+                         .replace("\r", ",") \
+                         .replace("\n", ",") \
+                         .replace(" ", ",")
+    raw_sites = raw_sites.split(",")
+
+    sites = list()
+    for raw_site in raw_sites:
+        site = raw_site.lstrip().rstrip()
+        if site:
+            sites.append(site)
+    return sites
 
 
 if __name__ == "__main__":
@@ -210,8 +274,7 @@ if __name__ == "__main__":
         # check the sites file
         filename = "sites.txt"
         if os.path.exists(filename):
-            with open(filename, "r") as f:
-                sites = f.read().rstrip().lstrip().split(",")
+            sites = parse_sites(filename)
         else:
             usage()
             sys.exit(1)
